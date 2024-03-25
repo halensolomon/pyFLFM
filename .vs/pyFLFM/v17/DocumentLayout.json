@@ -1,0 +1,94 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cu||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CPP_RL\\fftconv.cu||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cu||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CPP_RL\\cuda_rl.cu||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cuh||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CPP_RL\\cuda_rl.cuh||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cuh||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CPP_RL\\fftconv.cuh||{8B382828-6202-11D1-8870-0000F87579D2}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "fftconv.cuh",
+              "DocumentMoniker": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cuh",
+              "RelativeDocumentMoniker": "CPP_RL\\fftconv.cuh",
+              "ToolTip": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cuh",
+              "RelativeToolTip": "CPP_RL\\fftconv.cuh",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2024-03-25T16:15:24.13Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "fftconv.cu",
+              "DocumentMoniker": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cu",
+              "RelativeDocumentMoniker": "CPP_RL\\fftconv.cu",
+              "ToolTip": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\fftconv.cu",
+              "RelativeToolTip": "CPP_RL\\fftconv.cu",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAAA8AAAALAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2024-03-25T16:01:21.481Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "cuda_rl.cuh",
+              "DocumentMoniker": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cuh",
+              "RelativeDocumentMoniker": "CPP_RL\\cuda_rl.cuh",
+              "ToolTip": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cuh",
+              "RelativeToolTip": "CPP_RL\\cuda_rl.cuh",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAAAYAAAAXAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2024-03-25T16:15:15.206Z",
+              "EditorCaption": ""
+            }
+          ]
+        },
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "cuda_rl.cu",
+              "DocumentMoniker": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cu",
+              "RelativeDocumentMoniker": "CPP_RL\\cuda_rl.cu",
+              "ToolTip": "C:\\Users\\admin\\Documents\\Code\\pyFLFM\\CPP_RL\\cuda_rl.cu",
+              "RelativeToolTip": "CPP_RL\\cuda_rl.cu",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAADIAAAAAAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2024-03-25T16:00:49.296Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

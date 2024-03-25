@@ -1,0 +1,8 @@
+### Ignore .pt Files for Now
+*.pt
+*.tif
+*.tiff
+*.mat
+*.txt
+*.yml
+*.yaml
