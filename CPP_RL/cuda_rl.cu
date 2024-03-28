@@ -5,64 +5,32 @@
 #include "cuda_rl.cuh"
 #include "fftconv.cu"
 #include <opencv2/imgcodecs.hpp>
+#include "file_io.cu"
 
 namespace fs = std:filesystem;
+
+typedef float2 Complex;
 
 /// One image, multiple kernels: GPU implementation of the 2D convolution operation
 /// Zero-copy for image and kernel data
 /// Pinned memory for result data, since there will be multiple iterations
 
-void fileSearch(const std::string &path, const std::string &ext std::vector<std::string> &filepaths)
-{
-    for (const auto &p : fs::recursive_directory_iterator(path))
-    {
-        if (p.path().extension() == ext)
-            filePaths.push_back(p.path().string());
-    }
-}
+// void flipAdd2One(std::vector<std::vector<float>>& originalArray, std::vector<std::vector<float>>& flippedArray) {
+//     /// Flip the array and add the original and flipped arrays to one
+//     int numRows = originalArray.size();
+//     int numCols = originalArray[0].size();
 
-std::vector<float>* readImage(const std::string &path)
-{
-    /// Read the image and store it in a vector
-    cv::Mat MatImage = cv::imread(path, cv::IMREAD_UNCHANGED);
-    std::vector<float>* ImagePtr = new std::vector<float>;
+//     std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
 
-    if (MatImage.empty())
-    {
-        std::cout << "Could not read the image: " << path << std::endl;
-        exit(0);
-    }
-
-    if (MatImage.isContinuous())
-    {
-        ImagePtr->assign(reinterpret_cast<float*>(MatImage.data), reinterpret_cast<float*>(MatImage.data) + MatImage.total() * MatImage.channels());
-        MatImage.release();
-    }
-    else
-    {
-        std::cout << "Image is not continuous" << std::endl;
-        exit(1);
-    }
-
-    return ImagePtr;
-}
-
-void flipAdd2One(std::vector<std::vector<float>>& originalArray, std::vector<std::vector<float>>& flippedArray) {
-    /// Flip the array and add the original and flipped arrays to one
-    int numRows = originalArray.size();
-    int numCols = originalArray[0].size();
-
-    std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
-
-    for (int i = 0; i < numRows; i++) {
-        for (int j = 0; j < numCols; j++) {
-            float sum = originalArray[i][j] + flippedArray[i][j];
-            originalArray[i][j] /= sum;
-            flippedArray[i][j] /= sum;
-            flippedArray[i][numCols - j - 1] = array[i][j];
-        }
-    }
-}
+//     for (int i = 0; i < numRows; i++) {
+//         for (int j = 0; j < numCols; j++) {
+//             float sum = originalArray[i][j] + flippedArray[i][j];
+//             originalArray[i][j] /= sum;
+//             flippedArray[i][j] /= sum;
+//             flippedArray[i][numCols - j - 1] = array[i][j];
+//         }
+//     }
+// }
 
 __global__ void rlAlg(int *imgdata, int *kern, int *result, int *imgsize, int *kernsize, int *numkern, int *iterations)
 {
