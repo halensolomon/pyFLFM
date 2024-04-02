@@ -28,7 +28,7 @@ __global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float 
     int kernx = kernsize[0];
     int kerny = kernsize[1];
     int kernz = kernsize[2];
-    int kernidx = idx + idy * kernx + idz * kernx * kerny;
+    int kernidx = idz + idx * kernx + idz * kernx * kerny;
 
     // Make sure image size and kernel size are the same
     assert (imgx == kernx);
@@ -37,9 +37,10 @@ __global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float 
     int centerx = kernx / 2;
     int centery = kerny / 2;
     
+    // Make cylinder mask
     if ((idx-centerx) ** 2 + (idy-centery) **2  > radius ** 2)
     {
-        result[residx] = 0;
+        result_3d[kernidx] = 0;
     }
     // Make sure result_2d only contains 0.0f
     result_2d[imgidx] = 0.0f;
@@ -53,29 +54,41 @@ __global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float 
         int kernidx = idx + idy * kernx + idz * kernx * kerny;
         int kernval = kernArray[kernidx];
 
-        // Convolve the image with the kernel
-        for (int j = 0; j < kernx; j++)
-        {
-            for (int k = 0; k < kerny; k++)
-            {
-                // Update the result for each kernel
-                result[idx] += fftconv(imgdata, kernArray[j], result_2d, imgx, imgy)
-            }
-        }
+        // Grab the specific kernel
+        thrust::device_vector<float> kern(kernArray + i * kernx * kerny, kernArray + (i + 1) * kernx * kerny);
 
-        // Divide the image elementwise by the result
-        thurst::device_vector<int> imgdata_2d(imgdata, imgdata + imgx * imgy);
-        thurst::device_vector<int> result_2d(result_2d, result + imgx * imgy);
-        thurst::transform(imgdata_2d.begin(), imgdata_2d.end(), result_2d.begin(), imgdata_2d.begin(), thurst::divides<float>());
+        // Make temporary variable to store fftconv result
+        thrust::device_vector temp(imgx * imgy);
 
-        // Convolve the image with the backward kernel
-        for (int z = 0; z < kernz; z++)
-        {
-            fftconv(imagdata_d, backkernArray[z], result_d, imgx, imgy)
-        }
-        
+        // Update the result for each kernel
+        fftconv(img, kern, temp, imgx, imgy)
+
+        result_2d[idx] += temp
     }
-    
+    // temp should be out of scope here, so it should be automatically deleted
+
+    // Divide the image elementwise by the result
+    //thurst::device_vector<float> imgdata_2d(img, &img + imgx * imgy);
+    //thurst::device_vector<float> result_2d(result_2d, result + imgx * imgy);
+
+    // Temporary variable to store the division result
+    thrust::device_vector<float> ratio(imgx * imgy );
+
+    thurst::transform(img.begin(), img.end(), result_2d.begin(), imgdata_2d.begin(), thurst::divides<float>());
+
+    // Convolve the image with the backward kernel
+    for (int z = 0; z < kernz; z++)
+    {
+        fftconv(imgdata, backkernArray[z], ratio[&ratio + z * imgx * imgy], imgx, imgy)
+    }
+
+    // Multiply the 3D result by the ratio
+    //thurst::device_vector<int> result_3d(result_3d, result_3d + kernz * imgx * imgy);
+
+    thurst::transform(result_3d.begin(), result_3d.end(), result_3d.begin(), ratio.begin(), thurst::multiplies<float>());
+
+    ratio.clear();
+    ratio.shrink_to_fit();
 }
 
 
@@ -223,10 +236,12 @@ int main(int argc, char** argv)
             std::cerr << "Image and kernel sizes do not match" << std::endl;
             exit(2);
             }
-        } 
+
+        
+        }
 
         // Continue with the algorithm
-
+        
 
     }
 }
