@@ -12,11 +12,19 @@
 using namespace std;
 
 
+using namespace std;
+
+
+/// Pad matrix with zeros, then take the 2D FFT
+/// Use cuBLAS.dgmm to perform element-wise multiplication of two matrices
+/// Then take the inverse 2D FFT
+/// Then crop the result to the original size
 /// Pad matrix with zeros, then take the 2D FFT
 /// Use cuBLAS.dgmm to perform element-wise multiplication of two matrices
 /// Then take the inverse 2D FFT
 /// Then crop the result to the original size
 
+__device__ void twoN(int *n, const int imgSize)
 __device__ void twoN(int *n, const int imgSize)
 {
     /// Caculate nearest 2^n that is greater than or equal to 2 * imgSize
@@ -26,7 +34,9 @@ __device__ void twoN(int *n, const int imgSize)
         *n *= 2;
     }
 }
+}
 
+__device__ void padMatrix(const float *d_A, cudaDoubleComplex *h_A, const int *imgSize_x, const int *imgSize_y, const int *n, const int *m)
 __device__ void padMatrix(const float *d_A, cudaDoubleComplex *h_A, const int *imgSize_x, const int *imgSize_y, const int *n, const int *m)
 {
     // Pads matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
@@ -34,13 +44,17 @@ __device__ void padMatrix(const float *d_A, cudaDoubleComplex *h_A, const int *i
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (idx < *n && idy < *m)
+    if (idx < *n && idy < *m)
     {
         if (idx < *imgSize_x && idy < *imgSize_y)
+        if (idx < *imgSize_x && idy < *imgSize_y)
         {
+            h_A[idx * (*m) + idy] = d_A[idx * (*imgSize_y) + idy];
             h_A[idx * (*m) + idy] = d_A[idx * (*imgSize_y) + idy];
         }
         else
         {
+            h_A[idx * (*m) + idy] = 0.0f;
             h_A[idx * (*m) + idy] = 0.0f;
         }
     }
@@ -83,8 +97,16 @@ __global__ void fftconv(const float *d_A, const float *d_B, float *d_result, int
 
     /// Assumes that the image and kernel are the same size
 
+
+    /// Assumes that the image and kernel are the same size
+
     /// Find correct size for padding
     int n;
+    twoN(&n, imgSize_x);
+
+    /// Find the correct size for padding
+    int m;
+    twoN(&m, imgSize_y);
     twoN(&n, imgSize_x);
 
     /// Find the correct size for padding
@@ -99,8 +121,17 @@ __global__ void fftconv(const float *d_A, const float *d_B, float *d_result, int
     cudaMalloc(&h_A, n * m * sizeof(cudaDoubleComplex));
     cudaMalloc(&h_B, n * m * sizeof(cudaDoubleComplex));
     cudaMalloc(&h_result, n * m * sizeof(cudaDoubleComplex));
+    /// h_A and h_B are used to store the padded matrix
+    /// h_A and h_B are pointers to the device memory
+
+    cudaDoubleComplex *h_A, *h_B, *h_result;
+    cudaMalloc(&h_A, n * m * sizeof(cudaDoubleComplex));
+    cudaMalloc(&h_B, n * m * sizeof(cudaDoubleComplex));
+    cudaMalloc(&h_result, n * m * sizeof(cudaDoubleComplex));
 
     /// Pad matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
+    padMatrix(d_A, h_A, imgSize_x, imgSize_y, n, m);
+    padMatrix(d_B, h_B, imgSize_x, imgSize_y, n, m);
     padMatrix(d_A, h_A, imgSize_x, imgSize_y, n, m);
     padMatrix(d_B, h_B, imgSize_x, imgSize_y, n, m);
 
@@ -175,6 +206,8 @@ __global__ cudaDoubleComplex fftconvKeepPad(const float *d_A, const float *d_B, 
     cudaFree(h_B); /// Free memory on the device
 
     /// Take the inverse 2D FFT
+    cufftPlan2d(&plan, n, m, CUFFT_C2C);
+    cufftExecC2C(plan, h_result, h_result, CUFFT_INVERSE);
     cufftPlan2d(&plan, n, m, CUFFT_C2C);
     cufftExecC2C(plan, h_result, h_result, CUFFT_INVERSE);
     cufftDestroy(plan);

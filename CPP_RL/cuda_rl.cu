@@ -6,8 +6,11 @@
 #include "fftconv.cu"
 #include <opencv2/imgcodecs.hpp>
 #include "file_io.cu"
+#include "file_io.cu"
 
 namespace fs = std:filesystem;
+
+typedef float2 Complex;
 
 typedef float2 Complex;
 
@@ -19,9 +22,23 @@ typedef float2 Complex;
 //     /// Flip the array and add the original and flipped arrays to one
 //     int numRows = originalArray.size();
 //     int numCols = originalArray[0].size();
+// void flipAdd2One(std::vector<std::vector<float>>& originalArray, std::vector<std::vector<float>>& flippedArray) {
+//     /// Flip the array and add the original and flipped arrays to one
+//     int numRows = originalArray.size();
+//     int numCols = originalArray[0].size();
 
 //     std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
+//     std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
 
+//     for (int i = 0; i < numRows; i++) {
+//         for (int j = 0; j < numCols; j++) {
+//             float sum = originalArray[i][j] + flippedArray[i][j];
+//             originalArray[i][j] /= sum;
+//             flippedArray[i][j] /= sum;
+//             flippedArray[i][numCols - j - 1] = array[i][j];
+//         }
+//     }
+// }
 //     for (int i = 0; i < numRows; i++) {
 //         for (int j = 0; j < numCols; j++) {
 //             float sum = originalArray[i][j] + flippedArray[i][j];
