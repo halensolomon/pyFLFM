@@ -9,8 +9,9 @@ using namespace cv;
 using namespace fs;
 using namespace std;
 
-void fileSearch(const std::string &path, const std::string &ext, std::vector<std::string> &filePaths)
+std::vector<std::string> fileSearch(const std::string &path, const std::string &ext)
 {
+    std::vector<std::string> filePaths;
     for (const auto &p : fs::recursive_directory_iterator(path))
     {
         if (p.path().extension() == ext)
@@ -18,28 +19,35 @@ void fileSearch(const std::string &path, const std::string &ext, std::vector<std
     }
 }
 
-std::vector<float>* readImage(const std::string &path)
+struct ImageData 
 {
+    std::vector<float> *image;
+    int width;
+    int height;
+};
+
+ImageData readImage(const std::string &path)
+{
+    ImageData img; // Image data struct
+
     /// Read the image and store it in a vector
     cv::Mat MatImage = cv::imread(path, cv::IMREAD_UNCHANGED);
     std::vector<float>* ImagePtr = new std::vector<float>;
 
     if (MatImage.empty())
     {
-        std::cout << "Could not read the image: " << path << std::endl;
-        exit(0);
+        throw std::runtime_error("Could not read image: " + path)
     }
 
-    if (MatImage.isContinuous())
+    if (!MatImage.isContinuous())
     {
-        ImagePtr->assign(reinterpret_cast<float*>(MatImage.data), reinterpret_cast<float*>(MatImage.data) + MatImage.total() * MatImage.channels());
-        MatImage.release();
-    }
-    else
-    {
-        std::cout << "Image is not continuous" << std::endl;
-        exit(1);
+        throw std::runtime_error("Image is not continuous: " + path);
     }
 
-    return ImagePtr;
+    img.data.assign(reinterpret_cast<float*>(MatImage.data), reinterpret_cast<float*>(MatImage.data) + MatImage.total() * MatImage.channels());
+    img.width = MatImage.cols;
+    img.height = MatImage.rows;
+    MatImage.release();
+
+    return img;
 }

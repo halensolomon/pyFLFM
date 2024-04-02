@@ -1,55 +1,17 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <cudnn.h>
+#include <algorithm>
 #include <torch/torch.h>
 #include "cuda_rl.cuh"
 #include "fftconv.cu"
 #include <opencv2/imgcodecs.hpp>
-#include "file_io.cu"
-#include "file_io.cu"
+#include "file_io.cuh"
 
 namespace fs = std:filesystem;
-
 typedef float2 Complex;
 
-typedef float2 Complex;
-
-/// One image, multiple kernels: GPU implementation of the 2D convolution operation
-/// Zero-copy for image and kernel data
-/// Pinned memory for result data, since there will be multiple iterations
-
-// void flipAdd2One(std::vector<std::vector<float>>& originalArray, std::vector<std::vector<float>>& flippedArray) {
-//     /// Flip the array and add the original and flipped arrays to one
-//     int numRows = originalArray.size();
-//     int numCols = originalArray[0].size();
-// void flipAdd2One(std::vector<std::vector<float>>& originalArray, std::vector<std::vector<float>>& flippedArray) {
-//     /// Flip the array and add the original and flipped arrays to one
-//     int numRows = originalArray.size();
-//     int numCols = originalArray[0].size();
-
-//     std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
-//     std::vector<std::vector<float>> flippedArray(numRows, std::vector<float>(numCols));
-
-//     for (int i = 0; i < numRows; i++) {
-//         for (int j = 0; j < numCols; j++) {
-//             float sum = originalArray[i][j] + flippedArray[i][j];
-//             originalArray[i][j] /= sum;
-//             flippedArray[i][j] /= sum;
-//             flippedArray[i][numCols - j - 1] = array[i][j];
-//         }
-//     }
-// }
-//     for (int i = 0; i < numRows; i++) {
-//         for (int j = 0; j < numCols; j++) {
-//             float sum = originalArray[i][j] + flippedArray[i][j];
-//             originalArray[i][j] /= sum;
-//             flippedArray[i][j] /= sum;
-//             flippedArray[i][numCols - j - 1] = array[i][j];
-//         }
-//     }
-// }
-
-__global__ void rlAlg(int *imgdata, int *kernPath, int *result, int *imgsize, int *kernsize, int *numkern, int* *radius)
+__global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float *result_2d, float *result_3d, int *imgsize, int *kernsize, int *numkern, int* *radius)
 {
     // Assumes that the image and kernel are the same size
     // Get the thread index
@@ -79,6 +41,8 @@ __global__ void rlAlg(int *imgdata, int *kernPath, int *result, int *imgsize, in
     {
         result[residx] = 0;
     }
+    // Make sure result_2d only contains 0.0f
+    result_2d[imgidx] = 0.0f;
 
     // Do one iteration of the RL algorithm
     // Project the volume to the image space
@@ -87,7 +51,7 @@ __global__ void rlAlg(int *imgdata, int *kernPath, int *result, int *imgsize, in
     {
         // Get the kernel data
         int kernidx = idx + idy * kernx + idz * kernx * kerny;
-        int kernval = kernPath[kernidx];
+        int kernval = kernArray[kernidx];
 
         // Convolve the image with the kernel
         for (int j = 0; j < kernx; j++)
@@ -95,19 +59,19 @@ __global__ void rlAlg(int *imgdata, int *kernPath, int *result, int *imgsize, in
             for (int k = 0; k < kerny; k++)
             {
                 // Update the result for each kernel
-                result[idx] += fftconv(imgdata, kernPath[j], result, imgx, imgy)
+                result[idx] += fftconv(imgdata, kernArray[j], result_2d, imgx, imgy)
             }
         }
 
         // Divide the image elementwise by the result
-        thurst::device_vector<int> imgdata_d(imgdata, imgdata + imgx * imgy);
-        thurst::device_vector<int> result_d(result, result + imgx * imgy);
-        thurst::transform(imgdata_d.begin(), imgdata_d.end(), result_d.begin(), imgdata_d.begin(), thurst::divides<float>());
+        thurst::device_vector<int> imgdata_2d(imgdata, imgdata + imgx * imgy);
+        thurst::device_vector<int> result_2d(result_2d, result + imgx * imgy);
+        thurst::transform(imgdata_2d.begin(), imgdata_2d.end(), result_2d.begin(), imgdata_2d.begin(), thurst::divides<float>());
 
         // Convolve the image with the backward kernel
-        for (int z =0; z < kernz; z++)
+        for (int z = 0; z < kernz; z++)
         {
-            
+            fftconv(imagdata_d, backkernArray[z], result_d, imgx, imgy)
         }
         
     }
@@ -117,14 +81,13 @@ __global__ void rlAlg(int *imgdata, int *kernPath, int *result, int *imgsize, in
 
 int main(int argc, char** argv)
 {
+    cudaError_t error;
+
     int numGPUs;
     cudaGetDeviceCount(&numGPUs);
     std::cout << "Number of GPUs: " << numGPUs << std::endl;
 
-    float *imgData = new float[imgX * imgY];
-    float *kernData = new float[imgX * imgY * kernZ];
-
-    // Use all available GPUs
+        // Use all available GPUs
     for (int i = 0; i < numGPUs; i++)
     {
         cudaSetDevice(i);
@@ -137,80 +100,100 @@ int main(int argc, char** argv)
     std::string imgPath = "C:/some/path/to/images/";
     std::string kernPath = "C:/some/path/to/kernels/";
 
-    fileSearch(imgPath, ".tif", imgPaths);
+    imgPaths = fileSearch(imgPath, ".tif");
     int numImages = imgPaths.size();
 
-    fileSearch(kernPath, ".tif", kernPaths);
+    kernPaths = fileSearch(kernPath, ".tif");
     int numKernels = kernPaths.size();
     
-    std::vector<std::vector<float>*> kernPtrStore;
+    // Find the size of the image and kernel
+    ImageData testimg = readImage(imgPaths[0]);
+    ImageData testkern = readImage(kernPaths[0]);
 
-    /// Read all the kernels
+    imgx = testimg.width;
+    imgy = testimg.height;
+    kernx = testkern.width;
+    kerny = testkern.height;
+
+    // Allocate memory for the image and kernel data
+    float* imgdevptr;
+    float* kerndevptr;
+    float* resultdevptr;
+
+    cudaError_t imgmem, kernmem, resultmem;
+
+    imgmem = cudaMalloc((void**)&imgdevptr, imgx * imgy * sizeof(float)); // Should only store one image at a time for memory efficiency
+    kernmem = cudaMalloc((void**)&kerndevptr, kernx * kerny * numKernels * sizeof(float)); // NEED to store all the kernels at once
+    resultmem = cudaMalloc((void**)&resultdevptr, imgx * imgy * sizeof(float)); // Should only store one image at a time for memory efficiency
+
+    // Copy kernel data to device
     for (int i = 0; i < numKernels; i++)
     {
-        /// Read kernel
-        std::vector<float>* kernPtr = readImage(kernPaths[i]);
-        if (kernPtr != nullptr)
-        {
-            std::cout << "Kernel read successfullly" << std::end1;
-            float* kernPinnedMem; // Pinned memory for kernel data
-            size_t kernByteSize = kernPtr->size() * sizeof(float); // Size of the kernel in bytes
-            cudaError_t error = cudaMallocHost((void**)&kernPinnedMem, kernByteSize); // Allocate pinned memory for kernel data
-            kernPtr.push_back(kernPinnedMem); // Store the kernel data in a vector
-        }
-
-        if (error != cudaSuccess) 
-        {
-            std::cerr << "Failed to allocate pinned memory for kernel data" << std::endl;
-        } 
-        else 
-        {
-            cuMemcpy(kernPinnedMem, kernPtr->data(), kernByteSize, cudaMemcpyHostToDevice);
-            kernPtrStore.push_back(kernPinnedMem); // Store the allocated pinned memory address
-        }
+        ImageData kerndata = readImage(kernPaths[i]);
+        cudaMemcpy(kerndevptr + i * kernx * kerny, kerndata.data, kernx * kerny * sizeof(float), cudaMemcpyHostToDevice); 
     }
 
-    // Make the backward kernel
-    for (int i = 0; i < numKernels, i++)
+    if (kernmem != cudaSuccess)
     {
-        std::vector<float>* backKernPtr = kernPtrStore[i];
+        std::cerr << "Failed to allocate memory for the kernel on the device" << std::endl;
+        exit(1);
+    }
 
-        float* backKernPinnedMem = backKernPtr->data();
-        size_t backKernByteSize = backKernPtr->size() * sizeof(float);
+    float* backkerndevptr;
 
-        cudaError_t error = cudaMemcpy(backKernPinnedMem, backKernPtr->data(), backKernByteSize, cudaMemcpyHostToDevice);
+    cudaError_t backkernmem;
 
-        if (error != cudaSuccess)
-        {
-            std::cerr << "Failed to copy kernel data to device" << std::endl;
-        }
+    backkernmem = cudaMalloc((void**)&backkerndevptr, kernx * kerny * numKernels * sizeof(float)); // NEED to store all the kernels at once
 
-        // Flip the kernel
-        for (int j = 0; j < backKernPtr->size(); j++)
-        {
-            backKernPtr[j] = backKernPtr[backKernPtr->size() - j - 1];
-        }
+    // Copy kernel data to device, but backwards
+    for (int i = 0; i < numKernels; i++)
+    {
+        ImageData kerndata = readImage(kernPaths[i]);
+        std::reverse(kerndata.data.begin(), kerndata.data.end());
+        cudaMemcpy(backkerndevptr + i * kernx * kerny, kerndata.data, kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
+    }
 
-        // Normalize the kernel by going through the kernel elementwise
-        // Use thrust for this, since all kernels are the same size
-        // Add all the kernels elementwise
-        thurst::device_vector<float> backKernVec(backKernPtr->data(), backKernPtr->data() + backKernPtr->size());
-        thurst::device_vector<float> backKernSum(backKernPtr->size(), 0);
-        thurst::transform(backKernVec.begin(), backKernVec.end(), backKernSum.begin(), backKernSum.begin(), thurst::plus<float>());
+    if (backkernmem != cudaSuccess)
+    {
+        std::cerr << "Failed to allocate memory for the kernel on the device" << std::endl;
+        exit(1);
+    }
 
-        // Normalize the kernel
-        thurst::transform(backKernVec.begin(), backKernVec.end(), backKernSum.begin(), backKernVec.begin(), thurst::divides<float>());
+    thrust::device_vector<float> kernsum(kernx * kerny); // Will be used to normalize the kernel
+
+    // Normalize the forward kernel
+    for (int i = 0; i < numKernels; i++)
+    {
+        float forward_sum = thrust::reduce(kerndevptr + i * kernx * kerny, kerndevptr + (i + 1) * kernx * kerny);
+        forward_sum += 1e-6; // Add a small number to avoid division by zero
+        thrust::device_vector<float> kernvec = thurst::device_vector<float>(kerndevptr + i * kernx * kerny, kerndevptr + (i + 1) * kernx * kerny);
+        thurst::transform(kernvec.begin(), kernvec.end(), thrust::make_constant_iterator(forward_sum), kernvec.begin(), thurst::divide<float>());
+
+        thrust::transform(backkernvec.begin(), backkernvec.end(), kernsum.begin(), kernsum.begin(), thurst::add<float>());
 
         // Copy the kernel back to the device
-        error = cudaMemcpy(backKernPinnedMem, backKernPtr->data(), backKernByteSize, cudaMemcpyHostToDevice);
+        cudaMemcpy(kerndevptr + i * kernx * kerny, kernvec.data(), kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
 
-        backKernVec.clear();
-        backKernSum.clear();
-
-        backKernVec.shrink_to_fit();
-        backKernSum.shrink_to_fit();
+        kernvec.clear();
+        kernvec.shrink_to_fit();
     }
 
+    thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(numKernels), kernsum.begin(), thurst::multiply<float>());
+    thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(1e-6), kernsum.begin(), thurst::add<float>());
+
+    // Make the backward kernel
+    for (int i = 0; i < numKernels; i++)
+    {
+        thrust::device_vector<float> backkern = thurst::device_vector<float>(backkerndevptr + i * kernx * kerny, backkerndevptr + (i + 1) * kernx * kerny);
+        thrust::transform(backkern.begin(), backkern.end(), kernsum.begin(), backkern.begin(), thurst::divide<float>());
+        cudaMemcpy(backkerndevptr + i * kernx * kerny, backkern.data(), kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
+
+        backkern.clear();
+        backkern.shrink_to_fit();
+    }
+
+    kernsum.clear();
+    kernsum.shrink_to_fit();
 
     /// Read images sequentially
     for (i = 0, i < Images, i++)
@@ -241,38 +224,9 @@ int main(int argc, char** argv)
             exit(2);
             }
         } 
+
+        // Continue with the algorithm
+
+
     }
-
-    // Else, continue with the algorithm
-    // Allocate memory on the device
-    float* results // Result data
-    cudaError_t error = cudaMallocHost((void**)&results, kernByteSize); // Allocate pinned memory for kernel data
-
-    if (error != cudaSuccess) 
-    {
-        std::cerr << "Failed to allocate pinned memory for result data" << std::endl;
-    }
-
-    
-    
-
-
-
-
-    // Initialize the kernel
-
-    // Initialize the result
-
-    // Initialize the image size
-
-    // Initialize the kernel size
-
-    // Initialize the number of kernels
-
-    // Allocate memory on the device
-
-    // Copy the data to the device
-
-
-
 }
