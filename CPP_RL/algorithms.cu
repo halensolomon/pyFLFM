@@ -1,4 +1,21 @@
-__global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float *result_2d, float *result_3d, int *imgsize, int *kernsize, int *numkern, int* *radius)
+#include <thrust/device_vector.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+
+__device__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
+{
+    if ((idx - centerx) * (idx - centerx) + (idy - centery) * (idy - centery) > (radius) * (radius))
+    {
+        input[idx + idy * imgx + idz * imgx * imgy] = 0;
+    }
+    else 
+    {
+        input[idx + idy * imgx + idz * imgx * imgy] = 1;
+    }
+}
+
+
+__global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float *result_2d, float *result_3d, int *imgsize, int *kernsize, int *numkern, int *radius)
 {
     // Assumes that the image and kernel are the same size
     // Get the thread index
@@ -24,11 +41,25 @@ __global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float 
     int centerx = kernx / 2;
     int centery = kerny / 2;
     
-    // Make cylinder mask
-    if ((idx-centerx) ** 2 + (idy-centery) **2  > radius ** 2)
+    // Declaration of the cylinder mask
+    void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
     {
-        result_3d[kernidx] = 0;
+        if ((idx - centerx) * (idx - centerx) + (idy - centery) * (idy - centery) > (*radius) * (*radius))
+        {
+            input[idx + idy * imgx + idz * imgx * imgy] = 0;
+        }
+        else 
+        {
+            input[idx + idy * imgx + idz * imgx * imgy] = 1;
+        }
     }
+
+    thrust::device_vector<int> cyl(imgx * imgy* kernz);
+    cylMask(cyl, idx, idy, idz, imgx, imgy, centerx, centery, radius);
+
+    // Apply cylinder mask
+    thrust::transform()
+    
     // Make sure result_2d only contains 0.0f
     result_2d[imgidx] = 0.0f;
 

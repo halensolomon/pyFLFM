@@ -1,11 +1,11 @@
 #include <iostream>
-#include <cuda_runtime.h>
+#include <cuda.h>
 #include <cudnn.h>
 #include <algorithm>
-#include <torch/torch.h>
-#include "cuda_rl.cuh"
-#include "fftconv.cu"
 #include <opencv2/imgcodecs.hpp>
+#include "cuda_rl.cuh"
+#include "algorithms.cuh"
+#include "fftconv.cuh"
 #include "file_io.cuh"
 
 namespace fs = std:filesystem;
@@ -50,13 +50,15 @@ int main(int argc, char** argv)
     // Allocate memory for the image and kernel data
     float* imgdevptr;
     float* kerndevptr;
-    float* resultdevptr;
+    float* result2ddevptr;
+    float* result3ddevptr;
 
     cudaError_t imgmem, kernmem, resultmem;
 
     imgmem = cudaMalloc((void**)&imgdevptr, imgx * imgy * sizeof(float)); // Should only store one image at a time for memory efficiency
     kernmem = cudaMalloc((void**)&kerndevptr, kernx * kerny * numKernels * sizeof(float)); // NEED to store all the kernels at once
-    resultmem = cudaMalloc((void**)&resultdevptr, imgx * imgy * sizeof(float)); // Should only store one image at a time for memory efficiency
+    resultmem = cudaMalloc((void**)&result2ddevptr, imgx * imgy * sizeof(float)); // Should only store one image at a time for memory efficiency
+    resultmem = cudaMalloc((void**)&result3ddevptr, imgx * imgy * numKernels * sizeof(float)); // NEED to store all the results at once
 
     // Copy kernel data to device
     for (int i = 0; i < numKernels; i++)
@@ -155,12 +157,9 @@ int main(int argc, char** argv)
             std::cerr << "Image and kernel sizes do not match" << std::endl;
             exit(2);
             }
-
-        
         }
 
         // Continue with the algorithm
-        
-
+        rlAlg(imgdevptr, kerndevptr, backkerndevptr, result2ddevptr, result3ddevptr, imgPtr->size(), kernPtr->size(), numKernels, 400);
     }
 }
