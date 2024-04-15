@@ -107,11 +107,13 @@ int main(int argc, char** argv)
 
         // Copy the kernel back to the device
         cudaMemcpy(kerndevptr + i * kernx * kerny, kernvec.data(), kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
-
+        
+        // Don't forget to clear the vector
         kernvec.clear();
         kernvec.shrink_to_fit();
     }
 
+    // Normalize the kernels
     thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(numKernels), kernsum.begin(), thurst::multiply<float>());
     thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(1e-6), kernsum.begin(), thurst::add<float>());
 
@@ -125,7 +127,7 @@ int main(int argc, char** argv)
         backkern.clear();
         backkern.shrink_to_fit();
     }
-
+    // Clear the kernel sum
     kernsum.clear();
     kernsum.shrink_to_fit();
 
