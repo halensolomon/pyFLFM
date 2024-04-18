@@ -19,24 +19,25 @@ int main(int argc, char** argv)
     cudaGetDeviceCount(&numGPUs);
     std::cout << "Number of GPUs: " << numGPUs << std::endl;
 
-        // Use all available GPUs
-    for (int i = 0; i < numGPUs; i++)
-    {
-        cudaSetDevice(i);
-        cudaDeviceEnablePeerAccess(i, 0);
-    }
-
     // Search for all the images in the directory
     std::vector<std::string> imgPaths;
     std::vector<std::string> kernPaths;
-    std::string imgPath = "C:/some/path/to/images/";
-    std::string kernPath = "C:/some/path/to/kernels/";
+
+    std::string imgPath;
+    std::string kernPath;
+
+    std::cout << "Enter the path to the images: ";
+    std::cin >> imgPath;
+    std::cout << "Enter the path to the kernels: ";
+    std::cin >> kernPath;
 
     imgPaths = fileSearch(imgPath, ".tif");
     int numImages = imgPaths.size();
+    std::cout << "Number of images: " << numImages << std::endl;
 
     kernPaths = fileSearch(kernPath, ".tif");
     int numKernels = kernPaths.size();
+    std::cout << "Number of kernels: " << numKernels << std::endl;
     
     // Find the size of the image and kernel
     ImageData testimg = readImage(imgPaths[0]);
@@ -93,43 +94,9 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    thrust::device_vector<float> kernsum(kernx * kerny); // Will be used to normalize the kernel
-
-    // Normalize the forward kernel
-    for (int i = 0; i < numKernels; i++)
-    {
-        float forward_sum = thrust::reduce(kerndevptr + i * kernx * kerny, kerndevptr + (i + 1) * kernx * kerny);
-        forward_sum += 1e-6; // Add a small number to avoid division by zero
-        thrust::device_vector<float> kernvec = thurst::device_vector<float>(kerndevptr + i * kernx * kerny, kerndevptr + (i + 1) * kernx * kerny);
-        thurst::transform(kernvec.begin(), kernvec.end(), thrust::make_constant_iterator(forward_sum), kernvec.begin(), thurst::divide<float>());
-
-        thrust::transform(backkernvec.begin(), backkernvec.end(), kernsum.begin(), kernsum.begin(), thurst::add<float>());
-
-        // Copy the kernel back to the device
-        cudaMemcpy(kerndevptr + i * kernx * kerny, kernvec.data(), kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
-        
-        // Don't forget to clear the vector
-        kernvec.clear();
-        kernvec.shrink_to_fit();
-    }
-
-    // Normalize the kernels
-    thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(numKernels), kernsum.begin(), thurst::multiply<float>());
-    thrust::transform(kernsum.begin(), kernsum.end(), thrust::make_constant_iterator(1e-6), kernsum.begin(), thurst::add<float>());
-
-    // Make the backward kernel
-    for (int i = 0; i < numKernels; i++)
-    {
-        thrust::device_vector<float> backkern = thurst::device_vector<float>(backkerndevptr + i * kernx * kerny, backkerndevptr + (i + 1) * kernx * kerny);
-        thrust::transform(backkern.begin(), backkern.end(), kernsum.begin(), backkern.begin(), thurst::divide<float>());
-        cudaMemcpy(backkerndevptr + i * kernx * kerny, backkern.data(), kernx * kerny * sizeof(float), cudaMemcpyHostToDevice);
-
-        backkern.clear();
-        backkern.shrink_to_fit();
-    }
-    // Clear the kernel sum
-    kernsum.clear();
-    kernsum.shrink_to_fit();
+    psfNorm(); // Normalize the kernel
+    psfbNorm(); // Normalize the backward kernel
+    fftpsf(); // Take the FFT of the kernel
 
     /// Read images sequentially
     for (i = 0, i < Images, i++)
@@ -160,8 +127,30 @@ int main(int argc, char** argv)
             exit(2);
             }
         }
-
-        // Continue with the algorithm
-        rlAlg(imgdevptr, kerndevptr, backkerndevptr, result2ddevptr, result3ddevptr, imgPtr->size(), kernPtr->size(), numKernels, 400);
     }
+    /// Load PSF and PSFb into device memory and normalize
+    psfNorm();
+    psfbNorm();
+    /// Take the FFT of the kernel
+    fftpsf();
+    fftpsf();
+
+    /// Ask the user for the number of iterations
+    int itr;
+    std::cout << "Enter the number of iterations: ";
+    std::cin >> itr;
+
+    /// Run the RL algorithm
+    thrust::host_vector<float>> result_3d(imgx * imgy * numKern);
+    rlAlgHost();
+
+    // call IO function to write the result to disk
+    str resultPath = "C:/some/path/to/results/";
+    std::cout << "Enter path to save the result: ";
+    std::cin >> resultPath;
+    std::cout << "Writing result to disk" << std::endl;
+
+    writeImage(result_3d, "result_3d.raw");
+    std::cout << "Result written to disk" << std::endl;
+    std::cout << "Done" << std::endl;
 }

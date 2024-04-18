@@ -3,6 +3,12 @@
     "files.associations": {
         "ostream": "cpp",
         "vector": "cpp",
-        "complex": "cpp"
+        "complex": "cpp",
+        "__split_buffer": "cpp",
+        "string": "cpp",
+        "__bit_reference": "cpp",
+        "array": "cpp",
+        "initializer_list": "cpp",
+        "string_view": "cpp"
     }
 }

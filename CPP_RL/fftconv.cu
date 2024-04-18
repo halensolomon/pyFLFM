@@ -4,8 +4,7 @@
 #include <vector>
 #include <complex>
 //#include <thrust/device_vector.h>
-#include <thrust/transform.h>
-
+#include "thrust/transforms.h"
 #include "cufft.h"
 #include "cufft_utils.h"
 
@@ -20,7 +19,7 @@ using namespace std;
 /// Then take the inverse 2D FFT
 /// Then crop the result to the original size
 
-__device__ void twoN(int *n, const int imgSize)
+__global__ void twoN(int *n, const int imgSize)
 {
     /// Caculate nearest 2^n that is greater than or equal to 2 * imgSize
     *n = 1;
@@ -30,7 +29,7 @@ __device__ void twoN(int *n, const int imgSize)
     }
 }
 
-__device__ void padMatrix(const float *d_A, cudaDoubleComplex *h_A, const int *imgSize_x, const int *imgSize_y, const int *n, const int *m)
+__global__ void padMatrix(const float *input, thrust::device_vector<thrust::complex> *output, const int *imgSize_x, const int *imgSize_y, const int *n, const int *m)
 {
     // Pads matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -40,165 +39,71 @@ __device__ void padMatrix(const float *d_A, cudaDoubleComplex *h_A, const int *i
     {
         if (idx < *imgSize_x && idy < *imgSize_y)
         {
-            h_A[idx * (*m) + idy] = d_A[idx * (*imgSize_y) + idy];
+            output[idx * (*m) + idy] = input[idx * (*imgSize_y) + idy];
         }
         else
         {
-            h_A[idx * (*m) + idy] = 0.0f;
+            output[idx * (*m) + idy] = 0.0f;
         }
     }
 }
 
-__device__ void c2rCropMatrix(const cudaDoubleComplex *input, float *output, const int n, const int m, const int imgSize_x, const int imgSize_y)
+__global__ void setPadZero(thrust::device_vector<thrust::complex> *input, const int *n, const int *m)
 {
-    /// Drop the imaginary part of the complex matrix and crop the result to the original size
-    /// Output is not the same size as the input; it is the same size as the original image (imgSize_x * imgSize_y)
-
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (idx < imgSize_x && idy < imgSize_y)
+    if (idx >= *n || idy >= *m)
     {
-        output[idx * imgSize_y + idy] = static_cast<float>(input[idx * m + idy].x); /// Drop the imaginary part and crop the result
+        input[idx * (*m) + idy] = 0.0f;
     }
 }
 
-__device__ void cr2Matrix(const cudaDoubleComplex *input, const int n, const int m)
+__global__ void dropImag(thrust::device_vector<thrust::complex> *input)
 {
-    /// Drop the imaginary part of the complex matrix and keep padding
+    input.imag(0.0f);
+}
 
+__host__ void kernfft(const float *kern, thrust::device_vector<thrust::complex> *result, const int n, const int m)
+{
+    /// Take the 2D FFT
+    cufftHandle plan;
+    cufftPlan2d(&plan, n, m, CUFFT_Z2Z);
+    cufftExecZ2Z(plan, kern, result, CUFFT_FORWARD);
+    cufftDestroy(plan);
+}
+
+__host__ void fftconv(int batch, int dims, const float *img, const float *kernfft, float *result)
+{
+    /// Take the 2D FFT
+    cufftHandle plan;
+    cufftPlanMany(&plan, 2, dims, NULL, 1, 0, NULL, 1, 0, CUFFT_C2C, batch);
+    cufftExecZ2Z(plan, img, img, CUFFT_FORWARD);
+    cufftDestroy(plan);
+
+    /// Thurst element wise multiplication (treating array like vectors)
+    thrust::transform(img.begin(), img.end(), kernfft.begin(), result.begin(), thrust::multiplies<cudaDoubleComplex>());
+
+    /// Take the inverse 2D FFT
+    cufftPlan2d(&plan, n, m, CUFFT_Z2Z);
+    cufftExecC2C(plan, result, result, CUFFT_INVERSE);
+    cufftDestroy(plan);
+
+    /// Drop the imaginary part of the complex matrix and crop the result to the original size
+    dropImag(result);
+}
+
+__host__ void ogCrop(const thrust::device_vector<thrust::complex> *input, thrust::host_vector<thrust::float> *output, const int n, const int m, const int imgSize_x, const int imgSize_y, cosnt int numKern)
+{
+    /// Input is a complex matrix of n x m x numKern
+    /// Output is a real matrix of imgSize_x x imgSize_y x numKern
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
+    int idz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (idx < n && idy < m)
+    if (idx < imgSize_x && idy < imgSize_y && idz < numKern)
     {
-        input[idx * m + idy] = static_cast<float>(input[idx * m + idy].x);
+        output[idx * imgSize_y + idy + idz * imgSize_x * imgSize_y] = static_cast<float>(input[idx * m + idy + idz * n * m].real());
     }
-
-    if (idx > imgSize_x && idy > imgSize_y)
-    {
-        input[idx * m + idy] = 0.0f;
-    }
-}
-
-__global__ void fftconv(const float *d_A, const float *d_B, float *d_result, int imgSize_x, int imgSize_y)
-{
-    /// Assumes that the image and kernel are the same size
-
-    /// Find correct size for padding
-    int n;
-    twoN(&n, imgSize_x);
-
-    /// Find the correct size for padding
-    int m;
-    twoN(&m, imgSize_y);
-    twoN(&n, imgSize_x);
-
-    /// Allocate Device Memory for Image and Kernel
-    /// h_A and h_B are used to store the padded matrix
-    /// h_A and h_B are pointers to the device memory
-
-    cudaDoubleComplex *h_A, *h_B, *h_result;
-    cudaMalloc(&h_A, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_B, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_result, n * m * sizeof(cudaDoubleComplex));
-    /// h_A and h_B are used to store the padded matrix
-    /// h_A and h_B are pointers to the device memory
-
-    cudaDoubleComplex *h_A, *h_B, *h_result;
-    cudaMalloc(&h_A, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_B, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_result, n * m * sizeof(cudaDoubleComplex));
-
-    /// Pad matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
-    padMatrix(d_A, h_A, imgSize_x, imgSize_y, n, m);
-    padMatrix(d_B, h_B, imgSize_x, imgSize_y, n, m);
-    padMatrix(d_A, h_A, imgSize_x, imgSize_y, n, m);
-    padMatrix(d_B, h_B, imgSize_x, imgSize_y, n, m);
-
-    /// Take the 2D FFT
-    cufftHandle plan;
-    cufftPlan2d(&plan, n, m, CUFFT_C2C);
-    cufftExecC2C(plan, h_A, h_A, CUFFT_FORWARD);
-    cufftExecC2C(plan, h_B, h_B, CUFFT_FORWARD);
-    cufftDestroy(plan);
-
-    /// Thurst element wise multiplication (treating array like vectors)
-    thrust::device_ptr<int> thrust_h_A(h_A);
-    thrust::device_ptr<int> thrust_h_B(h_B);
-    thrust::device_ptr<int> thrust_h_result(h_result);
-    thrust::transform(thrust_h_A, thrust_h_A + n * m, thrust_h_B, thrust_h_result, thrust::multiplies<cudaDoubleComplex>());
-
-    cudaFree(h_A); /// Free memory on the device
-    cudaFree(h_B); /// Free memory on the device
-
-    /// Take the inverse 2D FFT
-    cufftPlan2d(&plan, n, m, CUFFT_C2C);
-    cufftExecC2C(plan, h_result, h_result, CUFFT_INVERSE);
-    cufftDestroy(plan);
-
-    /// Drop the imaginary part of the complex matrix and crop the result to the original size
-    c2rCropMatrix(h_result, d_result, n, m, imgSize_x, imgSize_y);
-
-    /// Free memory on the device
-    cudaFree(h_result);
-}
-
-__global__ cudaDoubleComplex fftconvKeepPad(const float *d_A, const float *d_B, int imgSize_x, int imgSize_y)
-{
-
-    /// Assumes that the image and kernel are the same size
-
-    /// Find correct size for padding
-    int n;
-    twoN(&n, imgSize_x);
-
-    /// Find the correct size for padding
-    int m;
-    twoN(&m, imgSize_y);
-
-    /// Allocate Device Memory for Image and Kernel
-    /// h_A and h_B are used to store the padded matrix
-    /// h_A and h_B are pointers to the device memory
-
-    cudaDoubleComplex *h_A, *h_B, *h_result;
-    cudaMalloc(&h_A, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_B, n * m * sizeof(cudaDoubleComplex));
-    cudaMalloc(&h_result, n * m * sizeof(cudaDoubleComplex));
-
-    /// Pad matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
-    padMatrix(d_A, h_A, imgSize_x, imgSize_y, n, m);
-    padMatrix(d_B, h_B, imgSize_x, imgSize_y, n, m);
-
-    /// Take the 2D FFT
-    cufftHandle plan;
-    cufftPlan2d(&plan, n, m, CUFFT_C2C);
-    cufftExecC2C(plan, h_A, h_A, CUFFT_FORWARD);
-    cufftExecC2C(plan, h_B, h_B, CUFFT_FORWARD);
-    cufftDestroy(plan);
-
-    /// Thurst element wise multiplication (treating array like vectors)
-    thrust::device_ptr<cudaDoubleComplex> thrust_h_A(h_A);
-    thrust::device_ptr<cudaDoubleComplex> thrust_h_B(h_B);
-    thrust::device_ptr<cudaDoubleComplex> thrust_h_result(h_result);
-    thrust::transform(thrust_h_A, thrust_h_A + n * m, thrust_h_B, thrust_h_result, thrust::multiplies<cudaDoubleComplex>());
-
-    cudaFree(h_A); /// Free memory on the device
-    cudaFree(h_B); /// Free memory on the device
-
-    /// Take the inverse 2D FFT
-    cufftPlan2d(&plan, n, m, CUFFT_C2C);
-    cufftExecC2C(plan, h_result, h_result, CUFFT_INVERSE);
-    cufftPlan2d(&plan, n, m, CUFFT_C2C);
-    cufftExecC2C(plan, h_result, h_result, CUFFT_INVERSE);
-    cufftDestroy(plan);
-
-    /// Drop the imaginary part of the complex matrix and crop the result to the original size
-    c2rmatrix(h_result, n, m);
-    
-    /// Deal with dangling pointers
-    h_A = nullptr;
-    h_B = nullptr;
-
-    return h_result;
+    // thrust::copy(result_3d.begin(), result_3d.end(), result_3d_host.begin());
 }

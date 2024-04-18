@@ -1,8 +1,9 @@
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/transform.h>
 #include <thrust/functional.h>
 
-__device__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
+__global__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
 {
     if ((idx - centerx) * (idx - centerx) + (idy - centery) * (idy - centery) > (radius) * (radius))
     {
@@ -13,94 +14,134 @@ __device__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int i
         input[idx + idy * imgx + idz * imgx * imgy] = 1;
     }
 }
+///<<<griddim, blockdim, sharedmem, stream>>>
 
+__host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<thrust::complex(double)> img, thrust::device_vector<thrust::complex(double)> kernArray, int itr)
+{   
+    // Arbitrary number of streams
+    int numStreams = 5;
+    cudaStream_t streams[numStreams];
+    
+    for (int i = 0; i < numStreams; i++)
+    {
+        cudaStreamCreate(&streams[i]);
+    }
 
-__host__ void rlAlgHost()
-{
+    int nPoT_x = 0;
+    int nPoT_y = 0;
+    twoN<<< >>>(nPoT_x, imgx); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+    twoN<<< >>>(nPoT_y, imgy); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+
+    padMatrix(img, nPoT_x, nPoT_y); // Pad the matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
+
     // Host needs to create enough memory for the image, kernel, and result
     // Host needs to copy the image and kernel data to the device
+    // Initialize the temporary variables
+    thrust::device_vector<thrust::complex<double>> predicted_img(nPoT_x * nPoT_y * numKern);
+    thrust::device_vector<thrust::complex<double>> result_sum(nPoT_x * nPoT_y);
+    thrust::device_vector<thrust::complex<double>> result_back(nPoT_x * nPoT_y * numKern);
+    thrust::device_vector<thrust::complex<double>> predicted_volume(nPoT_x * nPoT_y * numKern);
+    thrust::device_vector<thrust::complex<double>> ratio(nPoT_x * nPoT_y);
 
-    // Host needs to create a initial guess for the volume
-    thrust::device_vector<int> cyl(imgx * imgy * kernz); // Create a cylinder mask
-    thrust::transform(cyl.begin(), cyl.end(), cyl.begin(), 0); // Initialize the cylinder mask to 0
+    // Convert the device vector to a raw pointer
+    cuDoubleComplex _predicted_img = thrust::raw_pointer_cast(&predicted_img[0]);
+    cuDoubleComplex _result_sum = thrust::raw_pointer_cast(&result_sum[0]);
+    cuDoubleComplex _result_back = thrust::raw_pointer_cast(&result_back[0]);
+    cuDoubleComplex _predicted_volume = thrust::raw_pointer_cast(&predicted_volume[0]);
+    cuDoubleComplex _ratio = thrust::raw_pointer_cast(&ratio[0]);
 
-    cylMask<<< >>>( ); // Apply the cylinder mask
+    // Initialize the cylinder mask
+    thrust::fill(predicted_volume.begin(), predicted_volume.end(), 0.0f); // Initialize the array to 0
+    cylMask<<<>>>(_predicted_volume); // Apply the cylinder mask
 
-    // Host needs to create a temporary variable to store the 2D results
-    float* img_2d;
-    float* img_2d_sum;
-    float* vol_3d;
-    
-    // Allocate memory for the 2D results
-    cudaMalloc((void**)&img_2d, imgx * imgy * kernz * sizeof(float));
-    cudaMalloc((void**)&img_2d_sum, imgx * imgy * sizeof(float));
-    cudaMalloc((void**)&vol_3d, imgx * imgy * kernz * sizeof(float));
+    // Make transform iterator (0,1,2,...,elem-1)
+    thrust::device_vector<int> depthwise_addition_iterator(elem);
+    thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(elem), depthwise_addition_iterator.begin(), [] (int i) { return i % img_elem; });
 
-    // Could use a for loop, but that would be serializing the process
+    // Create cuFFT plans
+    cufftHandle plan_vol;
+    cufftHandle plan_result;
+
+    cufftPlanMany(&plan_vol, 2, dims, NULL, 1, 0, NULL, 1, 0, CUFFT_C2C, batch);
+    cufftExecZ2Z(plan_vol, kernArray, kernArray, CUFFT_FORWARD);
+
+    cufftPlan2D(&plan_result, nPoT_x, nPoT_y, CUFFT_Z2Z);
+    ///cufftExecZ2Z(plan_result, result_sum, result_sum, CUFFT_FORWARD);
+
+    cufftPlanMany(&plan_img, 2, dims, NULL, 1, 0, NULL, 1, 0, CUFFT_C2C, batch);
+    ///cufftExecZ2Z(plan, img, img, CUFFT_BACKWARD);
+
     for (int i = 0; i < itr; i++)
     {
-        rlAlg<<<>>>(img_2d, kernArray, backkernArray, img_2d_sum, vol_3d, imgsize, kernsize, numkern, radius);
+        // Forward FFT the volume
+        cufftExecZ2Z(_plan_vol, _predicted_volume, _predicted_volume, CUFFT_FORWARD);
+        thrust::transform(thrust::device, kernArray.begin(), kernArray.end(), predicted_volume.begin(), predicted_img.begin(), thrust::multiplies<thrust::complex<double>>()); // Multiply the 3D volume by the kernel
+        // Sum the depthwise addition
+        thrust::reduce_by_key(depthwise_addition_iterator.begin(), depthwise_addition_iterator.end(), predicted_img.begin(), thrust::make_discard_iterator(), result_sum.begin()); // Sum the depthwise addition
+        thrust::transform(thrust::device, result_sum.begin(), result_sum.end(), thrust::make_constant_iterator(1e-6), result_sum.begin(), thrust::plus<thrust::complex<double>>()); // Add a small number to avoid division by zero
+        // Divide the image by the sum
+        thrust::transform(thrust::device, img.begin(), img.end(), result_sum.begin(), ratio.begin(), thrust::divides<thrust::complex<double>>());
+        // Multiply the ratio by the backward kernel in the frequency domain and take the inverse FFT
+        thrust::transform(thrust::device, backkernArray.begin(), backkernArray.end(), ratio.begin(), result_back.begin(), thrust::multiplies<thrust::complex<double>>()); // Multiply the ratio by the backward kernel
+        cufftExecZ2Z(_plan_result, _result_back, _result_back, CUFFT_BACKWARD); // Backward FFT the result
+        cufftExecZ2Z(_plan_result, _predicted_volume, _predicted_volume, CUFFT_Backward); // Inverse FFT the predicted volume
+        thrust::transform(thrust::device, predicted_volume.begin(), predicted_volume.end(), result_back.begin(), predicted_volume.begin(), thrust::multiplies<thrust::complex<double>>()); // Multiply the 3D result by the ratio
     }
+
+    cufftDestroy(plan_vol);
+    cufftDestroy(plan_result);
+
+    // Copy the result back to the host device
+    ogCrop(predicted_volume, result_3d); // Crop the result to the original size
 }
 
-__global__ void rlAlg(float *img, float *kernArray, float *backkernArray, float *result_2d, float *result_3d, int *imgsize, int *kernsize, int *numkern, int *radius)
-{
-    // Assumes that the image and kernel are the same size
-    // Get the thread index
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int idy = blockIdx.y * blockDim.y + threadIdx.y;
-    int idz = blockIdx.z * blockDim.z + threadIdx.z;
+// __device__ void rlAlForward(float *img, float *kernArray, float *backkernArray, float *result_2d, 
+// float *result_3d, int *imgsize, int *kernsize, int *numkern, int *radius)
+// {
+//     // Assumes that the image and kernel are the same size
+//     // Get the thread index
+//     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//     int idy = blockIdx.y * blockDim.y + threadIdx.y;
+//     int idz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    // Get the image size; image should just be 2D
-    int imgx = imgsize[0];
-    int imgy = imgsize[1];
-    int imgidx = idx + idy * imgx;
+//     // Get the image size; image should just be 2D
+//     int imgx = imgsize[0];
+//     int imgy = imgsize[1];
+//     int imgidx = idx + idy * imgx;
 
-    // Get the kernel size
-    int kernx = kernsize[0];
-    int kerny = kernsize[1];
-    int kernz = kernsize[2];
-    int kernidx = idz + idx * kernx + idz * kernx * kerny;
+//     // Get the kernel size
+//     int kernx = kernsize[0];
+//     int kerny = kernsize[1];
+//     int kernz = kernsize[2];
+//     int kernidx = idz + idx * kernx + idz * kernx * kerny;
 
-    // Make sure image size and kernel size are the same
-    assert (imgx == kernx);
-    assert (imgy == kerny);
+//     // Make sure image size and kernel size are the same
+//     assert (imgx == kernx);
+//     assert (imgy == kerny);
 
-    int centerx = kernx / 2;
-    int centery = kerny / 2;
+//     int centerx = kernx / 2;
+//     int centery = kerny / 2;
 
-    // Update the result for each kernel
-    fftconv(img, kern, temp, imgx, imgy);
+//     // Update the result for each kernel
+//     fftconv(img, kern, temp, imgx, imgy);
 
-    result_2d[idx] = temp_img_res_2d[idx]; // Store the result in the 2D result array
+//     result_2d[idx] = temp_img_res_2d[idx]; // Store the result in the 2D result array
+// }
 
-    __synchronize();
+// __device__ void rlAlBackward(float *img, float *kernArray, float *backkernArray, float *result_2d, 
+// float *result_3d, int *imgsize, int *kernsize, int *numkern, int *radius)
+// {
+//     fftconv(imgdata, backkernArray[z], ratio[&ratio + z * imgx * imgy], imgx, imgy)
+// }
 
-    // Divide the image elementwise by the result
-    // Temporary variable to store the division result
-    thrust::device_vector<float> ratio(imgx * imgy);
-    thurst::transform(result_2d.begin(), result_2d.end(), thrust::make_constant_iterator(1e-6), result_2d.begin(), thurst::add<float>()); // Add a small number to avoid division by zero
-    thurst::transform(img.begin(), img.end(), result_2d.begin(), imgdata_2d.begin(), thurst::divides<float>());
-
-    backProp<<<>>>();
-
-    // Convolve the image with the backward kernel
-    for (int z = 0; z < kernz; z++)
-    {
-        fftconv(imgdata, backkernArray[z], ratio[&ratio + z * imgx * imgy], imgx, imgy)
-    }
-
-    // Multiply the 3D result by the ratio
-    //thurst::device_vector<int> result_3d(result_3d, result_3d + kernz * imgx * imgy);
-
-    thurst::transform(result_3d.begin(), result_3d.end(), ratio.begin(), result_3d.begin(), thurst::multiplies<float>()); // Multiply the 3D result by the ratio
-
-    ratio.clear(); // Might be unnecessary since all the variables will be out of scope
-    ratio.shrink_to_fit();
-};
-
-__device__ backProp()
-{
-    // Backward propagation
-    fftconv(img, backkernArray, temp, imgx, imgy);
-};
+// __device__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
+// {
+//     if ((idx - centerx) * (idx - centerx) + (idy - centery) * (idy - centery) > (radius) * (radius))
+//     {
+//         input[idx + idy * imgx + idz * imgx * imgy] = 0;
+//     }
+//     else 
+//     {
+//         input[idx + idy * imgx + idz * imgx * imgy] = 1;
+//     }
+// }
