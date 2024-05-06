@@ -9,6 +9,8 @@
         "__bit_reference": "cpp",
         "array": "cpp",
         "initializer_list": "cpp",
-        "string_view": "cpp"
+        "string_view": "cpp",
+        "sstream": "cpp",
+        "algorithm": "cpp"
     }
 }

@@ -3,6 +3,8 @@
 #include <thrust/transform.h>
 #include <thrust/functional.h>
 
+#include "misc.cuh"
+
 __global__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int imgy, int centerx, int centery, int radius)
 {
     if ((idx - centerx) * (idx - centerx) + (idy - centery) * (idy - centery) > (radius) * (radius))
@@ -16,7 +18,9 @@ __global__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int i
 }
 ///<<<griddim, blockdim, sharedmem, stream>>>
 
-__host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<thrust::complex(double)> img, thrust::device_vector<thrust::complex(double)> kernArray, int itr)
+__host__ void rlAlgHost(int itr, int imgx, int imgy, int numKern, 
+thrust::device_vector<thrust::complex(double)> img, thrust::device_vector<thrust::complex(double)> kernArray, 
+thrust::device_vector<thrust::complex(double)> backKernArray, thrust::host_vector<thrust::complex(double)> result_3d)
 {   
     // Arbitrary number of streams
     int numStreams = 5;
@@ -27,12 +31,10 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
         cudaStreamCreate(&streams[i]);
     }
 
-    int nPoT_x = 0;
-    int nPoT_y = 0;
+    int nPoT_x = 0; // nearest Power of Two for x
+    int nPoT_y = 0; // nearest Power of Two for y
     twoN<<< >>>(nPoT_x, imgx); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
     twoN<<< >>>(nPoT_y, imgy); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
-
-    padMatrix(img, nPoT_x, nPoT_y); // Pad the matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
 
     // Host needs to create enough memory for the image, kernel, and result
     // Host needs to copy the image and kernel data to the device
@@ -43,6 +45,12 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
     thrust::device_vector<thrust::complex<double>> predicted_volume(nPoT_x * nPoT_y * numKern);
     thrust::device_vector<thrust::complex<double>> ratio(nPoT_x * nPoT_y);
 
+    // Copy image to the padded vector
+    padMatrix(const thrust::device_vector<thrust::float> *input, thrust::device_vector<thrust::complex> *output, 
+const int *imgSize_x, const int *imgSize_y, const int *n, const int *m);
+
+    padMatrix(_img, nPoT_x, nPoT_y); // Pad the matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
+
     // Convert the device vector to a raw pointer
     cuDoubleComplex _predicted_img = thrust::raw_pointer_cast(&predicted_img[0]);
     cuDoubleComplex _result_sum = thrust::raw_pointer_cast(&result_sum[0]);
@@ -52,7 +60,7 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
 
     // Initialize the cylinder mask
     thrust::fill(predicted_volume.begin(), predicted_volume.end(), 0.0f); // Initialize the array to 0
-    cylMask<<<>>>(_predicted_volume); // Apply the cylinder mask
+    cylMask<<<    >>>(_predicted_volume); // Apply the cylinder mask
 
     // Make transform iterator (0,1,2,...,elem-1)
     thrust::device_vector<int> depthwise_addition_iterator(elem);
@@ -66,10 +74,6 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
     cufftExecZ2Z(plan_vol, kernArray, kernArray, CUFFT_FORWARD);
 
     cufftPlan2D(&plan_result, nPoT_x, nPoT_y, CUFFT_Z2Z);
-    ///cufftExecZ2Z(plan_result, result_sum, result_sum, CUFFT_FORWARD);
-
-    cufftPlanMany(&plan_img, 2, dims, NULL, 1, 0, NULL, 1, 0, CUFFT_C2C, batch);
-    ///cufftExecZ2Z(plan, img, img, CUFFT_BACKWARD);
 
     for (int i = 0; i < itr; i++)
     {
@@ -88,6 +92,7 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
         thrust::transform(thrust::device, predicted_volume.begin(), predicted_volume.end(), result_back.begin(), predicted_volume.begin(), thrust::multiplies<thrust::complex<double>>()); // Multiply the 3D result by the ratio
     }
 
+    /// Destroy the cuFFT plans
     cufftDestroy(plan_vol);
     cufftDestroy(plan_result);
 
@@ -95,6 +100,7 @@ __host__ void rlAlgHost(int imgx, int imgy, int numKern, thrust::device_vector<t
     ogCrop(predicted_volume, result_3d); // Crop the result to the original size
 }
 
+// This requires cuFFTdx instead of cuFFT
 // __device__ void rlAlForward(float *img, float *kernArray, float *backkernArray, float *result_2d, 
 // float *result_3d, int *imgsize, int *kernsize, int *numkern, int *radius)
 // {

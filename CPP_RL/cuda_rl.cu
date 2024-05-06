@@ -26,9 +26,9 @@ int main(int argc, char** argv)
     std::string imgPath;
     std::string kernPath;
 
-    std::cout << "Enter the path to the images: ";
+    std::cout << "Enter the path to the images: " << std::endl;
     std::cin >> imgPath;
-    std::cout << "Enter the path to the kernels: ";
+    std::cout << "Enter the path to the kernels: " << std::endl;
     std::cin >> kernPath;
 
     imgPaths = fileSearch(imgPath, ".tif");
@@ -131,6 +131,7 @@ int main(int argc, char** argv)
     /// Load PSF and PSFb into device memory and normalize
     psfNorm();
     psfbNorm();
+
     /// Take the FFT of the kernel
     fftpsf();
     fftpsf();
@@ -140,17 +141,25 @@ int main(int argc, char** argv)
     std::cout << "Enter the number of iterations: ";
     std::cin >> itr;
 
-    /// Run the RL algorithm
-    thrust::host_vector<float>> result_3d(imgx * imgy * numKern);
-    rlAlgHost();
-
-    // call IO function to write the result to disk
     str resultPath = "C:/some/path/to/results/";
     std::cout << "Enter path to save the result: ";
     std::cin >> resultPath;
-    std::cout << "Writing result to disk" << std::endl;
 
-    writeImage(result_3d, "result_3d.raw");
-    std::cout << "Result written to disk" << std::endl;
-    std::cout << "Done" << std::endl;
+    /// Run the RL algorithm
+    thrust::host_vector<float>> result_3d(imgx * imgy * numKern);
+    for i in range(imgPaths.size())
+    {
+        time_t start, end;
+        time(&start);
+        rlAlgHost(psf, psfb, img, );
+        time(&end);
+
+        std::cout << "Time taken for RL algorithm: " << difftime(end, start) << " seconds" << std::endl;
+        
+        // call IO function to write the result to disk
+        std::cout << "Writing result to disk" << std::endl;
+        writeImage(result_3d, "result_3d.raw");
+        std::cout << "Result written to disk" << std::endl;
+        std::cout << "Done" << std::endl;
+    }
 }
