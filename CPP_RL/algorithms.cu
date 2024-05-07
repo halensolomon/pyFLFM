@@ -67,14 +67,14 @@ thrust::device_vector<thrust::complex<double>> backKernArray, thrust::host_vecto
 
     // Make transform iterator (0,1,2,...,elem-1)
     thrust::device_vector<int> depthwise_addition_iterator(elem);
-    thrust::transform(thrust::device<>, thrust::make_counting_iterator(0), thrust::make_counting_iterator(elem), depthwise_addition_iterator.begin(), [] (int i) { return i % img_elem; });
+    {thrust::transform(depthwise_addition_iterator.begin(), depthwise_addition_iterator.end(), thrust::make_counting_iterator(0), thrust::make_counting_iterator(elem), depthwise_addition_iterator.begin(), [] (int i) { return i % img_elem; });
 
     // Create cuFFT plans
     cufftHandle plan_vol;
     cufftHandle plan_result;
 
     cufftPlanMany(&plan_vol, 2, dims, NULL, 1, 0, NULL, 1, 0, CUFFT_C2C, batch);
-    cufftExecZ2Z(plan_vol, kernArray, kernArray, CUFFT_FORWARD);
+    cufftExecZ2Z(plan_vol, _kernArray, _kernArray, CUFFT_FORWARD);
 
     cufftPlan2D(&plan_result, nPoT_x, nPoT_y, CUFFT_Z2Z);
 
