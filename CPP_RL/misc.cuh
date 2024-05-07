@@ -1,6 +1,8 @@
 #ifndef FFTCONV_HPP // include guard
 #define FFTCONV_HPP // include guard
 
+void twoN(int *n, const int imgSize);
+
 void padMatrix(const thrust::device_vector<thrust::float> *input, thrust::device_vector<thrust::complex> *output, 
 const int *imgSize_x, const int *imgSize_y, const int *n, const int *m);
 

@@ -1,11 +1,14 @@
 #include <iostream>
 #include <cuda.h>
-#include <cudnn.h>
-#include <algorithm>
-#include <opencv2/imgcodecs.hpp>
+
+#include "opencv2/imgcodecs.hpp"
 #include "cuda_rl.cuh"
 #include "algorithms.cuh"
 #include "fftconv.cuh"
+#include "file_io.cuh"
+
+#include "misc.cuh"
+#include "algorithms.cuh"
 #include "file_io.cuh"
 
 namespace fs = std:filesystem;
@@ -38,6 +41,15 @@ int main(int argc, char** argv)
     kernPaths = fileSearch(kernPath, ".tif");
     int numKernels = kernPaths.size();
     std::cout << "Number of kernels: " << numKernels << std::endl;
+
+    /// Ask the user for the number of iterations
+    int itr;
+    std::cout << "Enter the number of iterations: ";
+    std::cin >> itr;
+
+    str resultPath = "C:/some/path/to/results/";
+    std::cout << "Enter path to save the result: ";
+    std::cin >> resultPath;
     
     // Find the size of the image and kernel
     ImageData testimg = readImage(imgPaths[0]);
@@ -94,23 +106,66 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    psfNorm(); // Normalize the kernel
-    psfbNorm(); // Normalize the backward kernel
-    fftpsf(); // Take the FFT of the kernel
+    /// Two-Nify the kernel
+    int nPoT_x = 0; // nearest Power of Two for x
+    int nPoT_y = 0; // nearest Power of Two for y
+    twoN(&nPoT_x, imgx); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+    twoN(&nPoT_y, imgy); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+
+    /// Allocate memory for the image and kernel data
+    thrust::device_vector<thrust::complex<double>> img_padded(nPoT_x * nPoT_y);
+    thrust::device_vector<thrust::complex<double>> kern_padded(nPoT_x * nPoT_y * numKernels);
+    thrust::device_vector<thrust::complex<double>> backkern_padded(nPoT_x * nPoT_y * numKernels);
+
+    /// Grab the raw pointers for the device vectors
+    thrust::complex<double> *_img_padded = thrust::raw_pointer_cast(img.data());
+    thrust::complex<double> *_kern_padded = thrust::raw_pointer_cast(kernArray.data());
+    thrust::complex<double> *_backkern_padded = thrust::raw_pointer_cast(backKernArray.data());
+
+    /// Load PSF and PSFb into device memory and normalize
+    psfNorm(kerndevptr, kernx, kerny, numKernels);
+    psfbNorm(backkerndevptr, kernx, kerny, numKernels);
+
+    /// Copy kernels to the padded vector
+    padMatrix(kerndevptr, _kern_padded, kernx, kerny, nPoT_x, nPoT_y);
+    padMatrix(backkerndevptr, _backkern_padded, kernx, kerny, nPoT_x, nPoT_y);
+
+    /// Take the FFT of the kernel
+    fftpsf(_kern_padded);
+    fftpsf(_backkern_padded);
+
+    /// Allocate memory for the image and kernel data
+    thrust::device_vector<thrust::complex<double>> img_padded(nPoT_x * nPoT_y);
+    thrust::device_vector<thrust::complex<double>> kern_padded(nPoT_x * nPoT_y * numKernels);
+    thrust::device_vector<thrust::complex<double>> backkern_padded(nPoT_x * nPoT_y * numKernels);
+
+    /// Grab the raw pointers for the device vectors
+    thrust::complex<double> *_img_padded = thrust::raw_pointer_cast(img.data());
+    thrust::complex<double> *_kern_padded = thrust::raw_pointer_cast(kernArray.data());
+    thrust::complex<double> *_backkern_padded = thrust::raw_pointer_cast(backKernArray.data());
+
+    /// Copy kernels to the padded vector
+    padMatrix(kerndevptr, _kern_padded, kernx, kerny, nPoT_x, nPoT_y);
+    padMatrix(backkerndevptr, _backkern_padded, kernx, kerny, nPoT_x, nPoT_y);
+
+    /// Orignial kernel data is no longer needed
+    cudaFree(kerndevptr);
+    cudaFree(backkerndevptr);
+
+    /// Run the RL algorithm
+    thrust::host_vector<float>> result_3d(imgx * imgy * numKern);
 
     /// Read images sequentially
-    for (i = 0, i < Images, i++)
+    for (i = 0, i < numImages, i++)
     {
         std::vector<float>* imgPtr = readImage(imgPaths[i]);
         if (imgPtr != nullptr)
         {
             std::cout << "Image read successfully" << std::endl;
-            float* imgPinnedMem; // Pinned memory for image data
-            size_t imgByteSize = imgPtr->size() * sizeof(float); // Size of the image in bytes
             cudaError_t error = cudaHostAlloc((void**)&imgPinnedMem, imgByteSize); // Allocate pinned memory for image data
 
-            // Copy data from the vector to pinned memory
-            cudaMemcpy(imgPinnedMem, imgPtr->data(), imgByteSize); // Copy the image data to pinned memory
+            // Copy data from imgPtr to img_padded
+            cudaMemcpy(imgdevptr, imgPtr->data(), imgPtr->size(), cudaMemcpyHostToDevice);
 
             if (error != cudaSuccess) 
             {
@@ -127,39 +182,23 @@ int main(int argc, char** argv)
             exit(2);
             }
         }
-    }
-    /// Load PSF and PSFb into device memory and normalize
-    psfNorm();
-    psfbNorm();
 
-    /// Take the FFT of the kernel
-    fftpsf();
-    fftpsf();
-
-    /// Ask the user for the number of iterations
-    int itr;
-    std::cout << "Enter the number of iterations: ";
-    std::cin >> itr;
-
-    str resultPath = "C:/some/path/to/results/";
-    std::cout << "Enter path to save the result: ";
-    std::cin >> resultPath;
-
-    /// Run the RL algorithm
-    thrust::host_vector<float>> result_3d(imgx * imgy * numKern);
-    for i in range(imgPaths.size())
-    {
+        {
         time_t start, end;
         time(&start);
         rlAlgHost(psf, psfb, img, );
         time(&end);
-
+        std::cout<< "Image " << i << " processed"
         std::cout << "Time taken for RL algorithm: " << difftime(end, start) << " seconds" << std::endl;
         
         // call IO function to write the result to disk
         std::cout << "Writing result to disk" << std::endl;
         writeImage(result_3d, "result_3d.raw");
         std::cout << "Result written to disk" << std::endl;
-        std::cout << "Done" << std::endl;
+        
+        }
+    std::cout << "Done" << std::endl;
+
     }
+
 }

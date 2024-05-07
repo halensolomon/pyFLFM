@@ -91,7 +91,7 @@ __global__ void dropImag(thrust::device_vector<thrust::complex> *input)
 //     dropImag(result);
 // }
 
-__host__ void ogCrop(const thrust::device_vector<thrust::complex> *input, thrust::host_vector<thrust::float> *output, 
+__global__ void ogCrop(const thrust::device_vector<thrust::complex> *input, thrust::host_vector<thrust::float> *output, 
 const int n, const int m, const int imgSize_x, const int imgSize_y, cosnt int numKern)
 {
     /// Input is a complex matrix of n x m x numKern
@@ -103,5 +103,31 @@ const int n, const int m, const int imgSize_x, const int imgSize_y, cosnt int nu
     if (idx < imgSize_x && idy < imgSize_y && idz < numKern)
     {
         output[idx * imgSize_y + idy + idz * imgSize_x * imgSize_y] = static_cast<float>(input[idx * m + idy + idz * n * m].real()); // copy-assingment
+    }
+}
+
+__global__ void fftNorm(thrust::device_vector<thrust::complex> *input, const int n, const int m, const int numKern)
+{
+    /// Normalize the FFT of the kernel
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+    int idz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (idx < n && idy < m && idz < numKern)
+    {
+        input[idx * m + idy + idz * n * m] /= static_cast<float>(n * m);
+    }
+}
+
+__global__ void fftbNorm(thrust::device_vector<thrust::complex> *input, const int n, const int m, const int numKern)
+{
+    /// Normalize the FFT of the back kernel
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+    int idz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (idx < n && idy < m && idz < numKern)
+    {
+        input[idx * m + idy + idz * n * m] /= static_cast<float>(n * m);
     }
 }

@@ -2,6 +2,9 @@
 #include <thrust/host_vector.h>
 #include <thrust/transform.h>
 #include <thrust/functional.h>
+#include <thrust/complex.h>
+#include <cuComplex.h>
+#include <cufft.h>
 
 #include "misc.cuh"
 
@@ -19,11 +22,11 @@ __global__ void cylMask(float *input, int idx, int idy, int idz, int imgx, int i
 ///<<<griddim, blockdim, sharedmem, stream>>>
 
 __host__ void rlAlgHost(int itr, int imgx, int imgy, int numKern, 
-thrust::device_vector<thrust::complex(double)> img, thrust::device_vector<thrust::complex(double)> kernArray, 
-thrust::device_vector<thrust::complex(double)> backKernArray, thrust::host_vector<thrust::complex(double)> result_3d)
+thrust::device_vector<thrust::complex<double>> img, thrust::device_vector<thrust::complex<double>> kernArray, 
+thrust::device_vector<thrust::complex<double>> backKernArray, thrust::host_vector<thrust::complex<double>> result_3d)
 {   
     // Arbitrary number of streams
-    int numStreams = 5;
+    const int numStreams = 5;
     cudaStream_t streams[numStreams];
     
     for (int i = 0; i < numStreams; i++)
@@ -33,8 +36,8 @@ thrust::device_vector<thrust::complex(double)> backKernArray, thrust::host_vecto
 
     int nPoT_x = 0; // nearest Power of Two for x
     int nPoT_y = 0; // nearest Power of Two for y
-    twoN<<< >>>(nPoT_x, imgx); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
-    twoN<<< >>>(nPoT_y, imgy); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+    twoN(&nPoT_x, imgx); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
+    twoN(&nPoT_y, imgy); // Calculate the nearest power of 2 that is greater than or equal to 2 * imgSize
 
     // Host needs to create enough memory for the image, kernel, and result
     // Host needs to copy the image and kernel data to the device
@@ -44,27 +47,27 @@ thrust::device_vector<thrust::complex(double)> backKernArray, thrust::host_vecto
     thrust::device_vector<thrust::complex<double>> result_back(nPoT_x * nPoT_y * numKern);
     thrust::device_vector<thrust::complex<double>> predicted_volume(nPoT_x * nPoT_y * numKern);
     thrust::device_vector<thrust::complex<double>> ratio(nPoT_x * nPoT_y);
+    
+    // Grab the raw pointers for the device vectors
+    thrust::complex<double> *_img = thrust::raw_pointer_cast(img.data());
+    thrust::complex<double> *_kernArray = thrust::raw_pointer_cast(kernArray.data());
+    thrust::complex<double> *_backKernArray = thrust::raw_pointer_cast(backKernArray.data());
+    thrust::complex<double> *_predicted_img = thrust::raw_pointer_cast(predicted_img.data());
+    thrust::complex<double> *_result_sum = thrust::raw_pointer_cast(result_sum.data());
+    thrust::complex<double> *_result_back = thrust::raw_pointer_cast(result_back.data());
+    thrust::complex<double> *_predicted_volume = thrust::raw_pointer_cast(predicted_volume.data());
+    thrust::complex<double> *_ratio = thrust::raw_pointer_cast(ratio.data());
 
     // Copy image to the padded vector
-    padMatrix(const thrust::device_vector<thrust::float> *input, thrust::device_vector<thrust::complex> *output, 
-const int *imgSize_x, const int *imgSize_y, const int *n, const int *m);
-
-    padMatrix(_img, nPoT_x, nPoT_y); // Pad the matrix with zeros to the nearest power of 2 that is greater than or equal to 2 * imgSize
-
-    // Convert the device vector to a raw pointer
-    cuDoubleComplex _predicted_img = thrust::raw_pointer_cast(&predicted_img[0]);
-    cuDoubleComplex _result_sum = thrust::raw_pointer_cast(&result_sum[0]);
-    cuDoubleComplex _result_back = thrust::raw_pointer_cast(&result_back[0]);
-    cuDoubleComplex _predicted_volume = thrust::raw_pointer_cast(&predicted_volume[0]);
-    cuDoubleComplex _ratio = thrust::raw_pointer_cast(&ratio[0]);
-
+    padMatrix(_img, _predicted_img, &imgx, &imgy, &nPoT_x, &nPoT_y);
+    
     // Initialize the cylinder mask
     thrust::fill(predicted_volume.begin(), predicted_volume.end(), 0.0f); // Initialize the array to 0
     cylMask<<<    >>>(_predicted_volume); // Apply the cylinder mask
 
     // Make transform iterator (0,1,2,...,elem-1)
     thrust::device_vector<int> depthwise_addition_iterator(elem);
-    thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(elem), depthwise_addition_iterator.begin(), [] (int i) { return i % img_elem; });
+    thrust::transform(thrust::device<>, thrust::make_counting_iterator(0), thrust::make_counting_iterator(elem), depthwise_addition_iterator.begin(), [] (int i) { return i % img_elem; });
 
     // Create cuFFT plans
     cufftHandle plan_vol;

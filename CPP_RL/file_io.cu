@@ -51,3 +51,12 @@ ImageData readImage(const std::string &path)
 
     return img;
 }
+
+__host__ void writeImage(std::string &path, thrust::device_vector<thrust::complex> &img, int imgx, int imgy)
+{
+    std::vector<float> imgVec(img.size());
+    thrust::copy(img.begin(), img.end(), imgVec.begin());
+
+    cv::Mat imgMat(imgy, imgx, CV_32FC1, imgVec.data());
+    cv::imwrite(path, imgMat);
+}
