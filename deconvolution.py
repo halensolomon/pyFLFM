@@ -4,6 +4,22 @@ import gc
 import os
 from fft_conv import FFT_Conv2d
 
+# Define FFT Convolution
+def convfft(image,kernel):
+    # Assumes that the image and the kernel are the same size
+    # Assumes that the image and the kernel are square
+    # Assumes that the image and the kernel have been 2nified.
+    
+    image_fft = torch.fft.fft2(image.to(torch.float32), norm = 'backward')
+    kernel_fft = torch.fft.fft2(kernel.to(torch.float32), norm = 'backward')
+    fft_output = torch.mul(image_fft, kernel_fft)
+    
+    result = torch.fft.ifftshift(torch.abs(torch.fft.ifft2(fft_output, norm= 'backward'))).to(torch.float32)
+    
+    # Set edges to zero
+    result[0:int(kernel.shape[0]/4), :] = result[int(3*kernel.shape[0]/4):, :] = result[:, :int(kernel.shape[1]/4)] = result[:, int(3*kernel.shape[1]/4):] = 0
+    return result
+
 # Define the deconvolution function
 def rl_deconv(frames, PSF, PSF_bp, fov_radius, mask_width, device, iterations = 10, path = r"./", cpu_option = 'cpu', temp_storage = False, save_every = (False, 0), auto_stop = False, background_subtract = False):
     # Take the whole lenslet image & the whole PSFs and apply the Richardson-Lucy algorithm to it

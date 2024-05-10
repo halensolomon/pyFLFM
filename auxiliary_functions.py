@@ -5,6 +5,14 @@ import os
 import math
 import pil as Image # Should change to cv2 just for consistency
 
+def deconvolution_parameters(text):
+    with open(text) as f:
+        lines = f.readlines()
+    
+    
+    return 
+
+
 def median_filter(path, blur_radius = 6):
     """
     Args:
